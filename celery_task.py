@@ -5,7 +5,8 @@ import time
 from enum import Enum
 
 from config import BROKER_URL
-from email_providers.email_client import template_editor, email_client
+from email_providers.aws_ses_provider import EmailTemplateEditor
+from email_providers.email_client import email_client
 
 
 @dataclass
@@ -40,7 +41,7 @@ class RotationType(Enum):
 app = Celery('tasks', broker=BROKER_URL, backend=BROKER_URL)
 
 # Configure email senders
-EMAIL_SENDERS = [EmailConfig(email="your-email@deychop.xyz")]
+EMAIL_SENDERS = [EmailConfig(email="sales@deychop.xyz")]
 
 
 # Configuration
@@ -50,12 +51,18 @@ config = BatchConfig()
 class EmailBatchProcessor:
     """Handles batch processing of emails with rotation logic"""
 
-    def __init__(self, senders: List[EmailConfig], config: BatchConfig):
+    def __init__(
+        self,
+        senders: List[EmailConfig],
+        config: BatchConfig,
+        template_editor: EmailTemplateEditor = EmailTemplateEditor(),
+    ):
         self.senders = senders
         self.config = config
         self.sender_index = 0
         self.message_index = 0
         self.subject_index = 0
+        self._template_editor = template_editor
 
     def get_rotation_type(self, count: int) -> Optional[RotationType]:
         """Determine if rotation is needed and which type"""
@@ -94,12 +101,12 @@ class EmailBatchProcessor:
                 message = messages[self.message_index]
                 subject = subjects[self.subject_index]
 
-                body = template_editor.edit_template_and_return_body(
+                body = self._template_editor.edit_template_and_return_body(
                     "email_test.html", {"subject": subject, "message": f"{message}"}
                 )
 
                 to_email = email_data.get('Emails', email_data.get('email'))
-                result = email_client.send_html_email(sender=sender.email, to=to_email, subject=subject, body=body)
+                result = email_client.send_html_email(from_=sender.email, to=to_email, subject=subject, html=body)
 
                 # Track results
                 if result.get('status') == 'success':

@@ -59,7 +59,7 @@ def fetch_emails():
 def send_bulk_messages(payload: MailBodySerializer):
     try:
         extracted_data = redis_service.get_data(REDIS_EMAIL_KEY_PREFIX)  # This returns the list of emails
-        send_bulk_emails.delay(email_list=extracted_data, message=payload.bodies, subject=payload.subjects)
+        send_bulk_emails.delay(email_list=extracted_data, messages=payload.bodies, subjects=payload.subjects)
         return BulkEmailResponse(message=f"Bulk email sending initiated to {len(extracted_data)} recipients.")
     except Exception as e:
         print("ERROR", str(e))
@@ -73,9 +73,8 @@ def send_selected_bulk_messages(payload: MailBodySerializer):
     try:
         if not payload.email_list or len(payload.email_list) == 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email list cannot be empty.")
-        send_bulk_emails.delay(email_list=payload.email_list, message=payload.bodies, subject=payload.subjects)
+        send_bulk_emails.delay(email_list=payload.email_list, messages=payload.bodies, subjects=payload.subjects)
         return BulkEmailResponse(message=f"Bulk email sending initiated to {len(payload.email_list)} recipients.")
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Error!! Check the file format and try again."
-        )
+        print(e, "ERROR")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Error!!Occured try again")

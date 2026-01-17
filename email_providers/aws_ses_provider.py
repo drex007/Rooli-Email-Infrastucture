@@ -1,16 +1,15 @@
 import boto3 as boto3
 
-from adapters.email_adapters.email_adapter import EmailAdapter
 from botocore.exceptions import ClientError
+from email_providers.email_base_adapter import EmailAdapter
 from jinja2 import Environment, FileSystemLoader
 
 
-
 class AmazonEmailAdapter(EmailAdapter):
-    def _init_(self, client: boto3.client):
+    def __init__(self, client: boto3.client):
         self.client = client
 
-    async def send_html_email(self, from_: str, to: str, subject: str, html: str):
+    def send_html_email(self, from_: str, to: str, subject: str, html: str):
         try:
             response = self.client.send_email(
                 Destination={
@@ -34,14 +33,16 @@ class AmazonEmailAdapter(EmailAdapter):
             )
         except ClientError as e:
             print(e.response['Error']['Message'])
+            return {"status": "failure"}
 
         else:
             print("Email sent! Message ID:"),
             print(response['MessageId'])
+            return {"status": "success"}
 
 
 class EmailTemplateEditor:
-    def _init_(self, template_dir: str = "./templates"):
+    def __init__(self, template_dir: str = "./templates"):
         self.env = Environment(loader=FileSystemLoader(template_dir))
 
     def edit_template_and_return_body(self, template_name: str, context: dict) -> str:
