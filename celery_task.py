@@ -41,7 +41,7 @@ class RotationType(Enum):
 app = Celery('tasks', broker=BROKER_URL, backend=BROKER_URL)
 
 # Configure email senders
-EMAIL_SENDERS = [EmailConfig(email="sales@deychop.xyz")]
+EMAIL_SENDERS = [EmailConfig(email="marketing@deychop.xyz")]
 
 
 # Configuration
