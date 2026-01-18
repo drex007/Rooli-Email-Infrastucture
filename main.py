@@ -1,12 +1,18 @@
 # main.py
 from celery_task import send_bulk_emails
-from config import REDIS_EMAIL_KEY_PREFIX
+from config import MESSAGES, REDIS_EMAIL_KEY_PREFIX
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, UploadFile, File
 import file_extractor
 from redis_service.redis_service import RedisService
-from serializers import BulkEmailResponse, ExtractedFileSerializer, MailBodySerializer
+from serializers import (
+    BulkEmailResponse,
+    EmailMessageListPayload,
+    EmailMessageListSerializer,
+    ExtractedFileSerializer,
+    MailBodySerializer,
+)
 
 
 app = FastAPI(
@@ -43,6 +49,56 @@ def extract_emails_from_csv(file: UploadFile):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Error!! Check the file format and try again."
         )
+
+
+@app.post("/message", description="This route is used to add messages that can be used later")
+def save_message(payload: EmailMessageListPayload):
+    """
+    Docstring for save_message
+
+    :param payload: Description
+    :type payload: EmailMessageListPayload
+    :Returns a dictionary of {"message":""}
+    """
+    payload = payload.model_dump()
+    try:
+        messages_from_redis = redis_service.get_data(MESSAGES)
+        if messages_from_redis is not None:
+            for item in payload["messages"]:
+                messages_from_redis.append(item)
+                redis_service.set_data(MESSAGES, messages_from_redis)
+        else:
+            redis_service.set_data(MESSAGES, payload['messages'])
+        return {"message": "Emails added successfully"}
+    except Exception as e:
+        print("ERROR", str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Error occured when trying to add messages")
+
+
+@app.get("/messages", response_model=EmailMessageListSerializer)
+def get_messages():
+    try:
+        messages = redis_service.get_data(MESSAGES)
+        return EmailMessageListSerializer(messages=messages)
+    except Exception as e:
+        print("ERROR", str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Error fetching messages")
+
+
+@app.delete("/messages")
+def remove_message(subject: str):
+    try:
+        messages = redis_service.get_data(MESSAGES)
+        for message in messages:
+            if message['subject'] == subject:
+                messages.remove(message)
+
+        redis_service.set_data(MESSAGES, messages)
+
+        return {"message": "Message deleted successfully"}
+    except Exception as e:
+        print("ERROR", str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Error occured deleting message")
 
 
 @app.get("/get-emails", response_model=ExtractedFileSerializer)
