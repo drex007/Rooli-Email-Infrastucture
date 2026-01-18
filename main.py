@@ -129,8 +129,11 @@ def send_selected_bulk_messages(payload: MailBodySerializer):
     try:
         if not payload.email_list or len(payload.email_list) == 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email list cannot be empty.")
-        send_bulk_emails.delay(email_list=payload.email_list, messages=payload.bodies, subjects=payload.subjects)
-        return BulkEmailResponse(message=f"Bulk email sending initiated to {len(payload.email_list)} recipients.")
+        
+        payload = payload.model_dump()
+        send_bulk_emails.delay(email_list=payload["email_list"], messages=payload["bodies"], subjects=payload["subjects"])
+        return BulkEmailResponse(message=f"Bulk email sending initiated to {len(payload['email_list'])} recipients.")
     except Exception as e:
+
         print(e, "ERROR")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Error!!Occured try again")
