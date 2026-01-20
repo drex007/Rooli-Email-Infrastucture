@@ -20,14 +20,19 @@ class MailBodySerializer(BaseModel):
     bodies: List[str]
     email_list: Optional[List[EmailAddress]] = None
 
+class EmailMessagePayload(BaseModel):
+    subject: str
+    body: str
 
 class EmailMessageSample(BaseModel):
+    message_id: Optional[str] = None
     subject: str
     body: str
 
 
+
 class EmailMessageListPayload(BaseModel):
-    messages: Optional[List[EmailMessageSample]] = None
+    messages: Optional[List[EmailMessagePayload]] = None
 
 
 class EmailMessageListSerializer(BaseModel):

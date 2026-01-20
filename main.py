@@ -13,6 +13,7 @@ from serializers import (
     ExtractedFileSerializer,
     MailBodySerializer,
 )
+import uuid
 
 
 app = FastAPI(
@@ -61,10 +62,12 @@ def save_message(payload: EmailMessageListPayload):
     :Returns a dictionary of {"message":""}
     """
     payload = payload.model_dump()
+
     try:
         messages_from_redis = redis_service.get_data(MESSAGES)
         if messages_from_redis is not None:
             for item in payload["messages"]:
+                item['message_id'] = str(uuid.uuid4())
                 messages_from_redis.append(item)
                 redis_service.set_data(MESSAGES, messages_from_redis)
         else:
@@ -86,11 +89,11 @@ def get_messages():
 
 
 @app.delete("/messages")
-def remove_message(subject: str):
+def remove_message(message_id: str):
     try:
         messages = redis_service.get_data(MESSAGES)
         for message in messages:
-            if message['subject'] == subject:
+            if message['message_id'] == message_id:
                 messages.remove(message)
 
         redis_service.set_data(MESSAGES, messages)
