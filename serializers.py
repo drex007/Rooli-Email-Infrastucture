@@ -32,7 +32,7 @@ class EmailMessageSample(BaseModel):
 
 
 class EmailMessageListPayload(BaseModel):
-    messages: Optional[List[EmailMessagePayload]] = None
+    messages: list[EmailMessagePayload] = None
 
 
 class EmailMessageListSerializer(BaseModel):

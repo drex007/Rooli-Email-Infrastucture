@@ -10,6 +10,7 @@ from serializers import (
     BulkEmailResponse,
     EmailMessageListPayload,
     EmailMessageListSerializer,
+    EmailMessagePayload,
     ExtractedFileSerializer,
     MailBodySerializer,
 )
@@ -53,7 +54,7 @@ def extract_emails_from_csv(file: UploadFile):
 
 
 @app.post("/message", description="This route is used to add messages that can be used later")
-def save_message(payload: EmailMessageListPayload):
+def save_message(payload: EmailMessagePayload):
     """
     Docstring for save_message
 
@@ -64,14 +65,10 @@ def save_message(payload: EmailMessageListPayload):
     payload = payload.model_dump()
 
     try:
-        messages_from_redis = redis_service.get_data(MESSAGES)
-        if messages_from_redis is not None:
-            for item in payload["messages"]:
-                item['message_id'] = str(uuid.uuid4())
-                messages_from_redis.append(item)
-                redis_service.set_data(MESSAGES, messages_from_redis)
-        else:
-            redis_service.set_data(MESSAGES, payload['messages'])
+        messages_from_redis = redis_service.get_data(MESSAGES) or  []
+        payload['message_id'] = str(uuid.uuid4())
+        messages_from_redis.append(payload)
+        redis_service.set_data(MESSAGES, messages_from_redis)
         return {"message": "Emails added successfully"}
     except Exception as e:
         print("ERROR", str(e))
@@ -82,13 +79,14 @@ def save_message(payload: EmailMessageListPayload):
 def get_messages():
     try:
         messages = redis_service.get_data(MESSAGES)
+        print("REDIS:", repr(messages[-1]["body"]))
         return EmailMessageListSerializer(messages=messages)
     except Exception as e:
         print("ERROR", str(e))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Error fetching messages")
 
 
-@app.delete("/messages")
+@app.delete("/messages/{message_id}")
 def remove_message(message_id: str):
     try:
         messages = redis_service.get_data(MESSAGES)
