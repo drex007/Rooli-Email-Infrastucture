@@ -21,7 +21,7 @@ class BatchConfig:
     """Configuration for batch processing"""
 
     batch_size: int = 200
-    batch_delay_seconds: int = 50000  # ~13.9 hours
+    batch_delay_seconds: int = 3600
     email_delay_seconds: int = 60
     rotation_delay_seconds: int = 180
     rotation_intervals: List[int] = None

@@ -1,10 +1,14 @@
-from typing import List, Optional
+from typing import Any, List, Optional
 from pydantic import BaseModel
 
 
 class ExtractedFileSerializer(BaseModel):
     filename: str
-    extracted_records: List[dict]
+    extracted_records: List[Any]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
 
 
 class BulkEmailResponse(BaseModel):
@@ -20,15 +24,16 @@ class MailBodySerializer(BaseModel):
     bodies: List[str]
     email_list: Optional[List[EmailAddress]] = None
 
+
 class EmailMessagePayload(BaseModel):
     subject: str
     body: str
+
 
 class EmailMessageSample(BaseModel):
     message_id: Optional[str] = None
     subject: str
     body: str
-
 
 
 class EmailMessageListPayload(BaseModel):
