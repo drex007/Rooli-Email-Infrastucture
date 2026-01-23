@@ -23,7 +23,7 @@ class MailBodySerializer(BaseModel):
     subjects: List[str]
     bodies: List[str]
     email_list: Optional[List[EmailAddress]] = None
-    senders: Optional[List[str]] =  None #List of emails to used to send 
+    senders: Optional[List[str]] = None  # List of emails to used to send
 
 
 class EmailMessagePayload(BaseModel):

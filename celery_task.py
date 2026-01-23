@@ -43,7 +43,11 @@ class RotationType(Enum):
 app = Celery('tasks', broker=BROKER_URL, backend=BROKER_URL)
 
 # Configure email senders
-EMAIL_SENDERS = [EmailConfig(email="marketing@deychop.xyz"),EmailConfig(email="lucia@deychop.xyz"),EmailConfig(email="support@deychop.xyz")]
+EMAIL_SENDERS = [
+    EmailConfig(email="marketing@deychop.xyz"),
+    EmailConfig(email="lucia@deychop.xyz"),
+    EmailConfig(email="support@deychop.xyz"),
+]
 
 
 # Configuration
@@ -75,7 +79,7 @@ class EmailBatchProcessor:
             return RotationType.FIRST_VARIANT
         elif count > 49 and count < 99:
             return RotationType.SECOND_VARIANT
-        
+
         elif count > 99 and count < 149:
             return RotationType.THIRD_VARIANT
         else:
@@ -84,11 +88,11 @@ class EmailBatchProcessor:
     def rotate_content(self, rotation_type: RotationType, message_count: int, subject_count: int):
         """Rotate message and subject indices based on rotation type"""
         mapping = {
-        RotationType.FIRST_VARIANT: 0,
-        RotationType.SECOND_VARIANT: 1,
-        RotationType.THIRD_VARIANT: 2,
-        RotationType.FOURTH_VARIANT: 3,
-    }
+            RotationType.FIRST_VARIANT: 0,
+            RotationType.SECOND_VARIANT: 1,
+            RotationType.THIRD_VARIANT: 2,
+            RotationType.FOURTH_VARIANT: 3,
+        }
 
         idx = mapping.get(rotation_type, 0)
 
@@ -108,7 +112,6 @@ class EmailBatchProcessor:
         stats = {'successful': 0, 'failed': 0, 'errors': []}
 
         for count, email_data in enumerate(emails):
-            
             try:
                 # Get current configuration
                 sender = self.get_current_sender()
@@ -127,7 +130,7 @@ class EmailBatchProcessor:
                 else:
                     stats['failed'] += 1
                     stats['errors'].append({'email': email_data, 'error': result.get('message', 'Unknown error')})
-                
+
                 # Rotate sender for next email
                 self.rotate_sender()
                 # Check for content rotation
@@ -142,8 +145,6 @@ class EmailBatchProcessor:
                 stats['failed'] += 1
                 stats['errors'].append({'email': email_data, 'error': str(e)})
             print(f"Error sending to {email_data}: {e}")
-        
-            
 
         return stats
 
@@ -154,7 +155,9 @@ def split_into_batches(items: List, batch_size: int) -> List[List]:
 
 
 @app.task(bind=True, name='tasks.send_bulk_emails')
-def send_bulk_emails(self, email_list: List[dict], messages: List[str], subjects: List[str], email_senders:List[str]) -> Dict:
+def send_bulk_emails(
+    self, email_list: List[dict], messages: List[str], subjects: List[str], email_senders: List[str]
+) -> Dict:
     """
     Send bulk emails with rotation of senders, messages, and subjects
 

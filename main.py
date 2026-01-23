@@ -36,8 +36,6 @@ app.add_middleware(
 redis_service = RedisService()
 
 
-
-
 @app.get("/")
 async def root():
     return {"message": "Welcome to FastAPI", "docs": "/docs", "redoc": "/redoc"}
@@ -133,7 +131,9 @@ def fetch_emails(page: int = 1, page_size: int = 70):
 def send_bulk_messages(payload: MailBodySerializer):
     try:
         extracted_data = redis_service.get_data(REDIS_EMAIL_KEY_PREFIX)  # This returns the list of emails
-        send_bulk_emails.delay(email_list=extracted_data, messages=payload.bodies, subjects=payload.subjects, email_senders = payload.senders)
+        send_bulk_emails.delay(
+            email_list=extracted_data, messages=payload.bodies, subjects=payload.subjects, email_senders=payload.senders
+        )
         return BulkEmailResponse(message=f"Bulk email sending initiated to {len(extracted_data)} recipients.")
     except Exception as e:
         print("ERROR", str(e))
@@ -151,13 +151,15 @@ def send_selected_bulk_messages(payload: MailBodySerializer):
         payload = payload.model_dump()
 
         send_bulk_emails.delay(
-            email_list=payload["email_list"], messages=payload["bodies"], subjects=payload["subjects"], email_senders = payload['senders']
+            email_list=payload["email_list"],
+            messages=payload["bodies"],
+            subjects=payload["subjects"],
+            email_senders=payload['senders'],
         )
         return BulkEmailResponse(message=f"Bulk email sending initiated to {len(payload['email_list'])} recipients.")
     except Exception as e:
         print(e, "ERROR")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Error!!Occurred try again")
-
 
 
 @app.get("/email-senders", response_model=dict)
