@@ -28,7 +28,7 @@ class BatchConfig:
 
     def __post_init__(self):
         if self.rotation_intervals is None:
-            self.rotation_intervals = [14, 29, 44, 59]
+            self.rotation_intervals = [49, 99, 149, 199]
 
 
 class RotationType(Enum):
@@ -36,12 +36,14 @@ class RotationType(Enum):
 
     FIRST_VARIANT = 0
     SECOND_VARIANT = 1
+    THIRD_VARIANT = 2
+    FOURTH_VARIANT = 3
 
 
 app = Celery('tasks', broker=BROKER_URL, backend=BROKER_URL)
 
 # Configure email senders
-EMAIL_SENDERS = [EmailConfig(email="marketing@deychop.xyz")]
+EMAIL_SENDERS = [EmailConfig(email="marketing@deychop.xyz"),EmailConfig(email="lucia@deychop.xyz"),EmailConfig(email="support@deychop.xyz")]
 
 
 # Configuration
@@ -69,18 +71,29 @@ class EmailBatchProcessor:
         if count not in self.config.rotation_intervals:
             return None
 
-        if count in [29, 59]:
+        if count < 49:
+            return RotationType.FIRST_VARIANT
+        elif count > 49 and count < 99:
             return RotationType.SECOND_VARIANT
-        return RotationType.FIRST_VARIANT
+        
+        elif count > 99 and count < 149:
+            return RotationType.THIRD_VARIANT
+        else:
+            return RotationType.FOURTH_VARIANT
 
     def rotate_content(self, rotation_type: RotationType, message_count: int, subject_count: int):
         """Rotate message and subject indices based on rotation type"""
-        if rotation_type == RotationType.SECOND_VARIANT:
-            self.message_index = min(1, message_count - 1)
-            self.subject_index = min(1, subject_count - 1)
-        else:
-            self.message_index = 0
-            self.subject_index = 0
+        mapping = {
+        RotationType.FIRST_VARIANT: 0,
+        RotationType.SECOND_VARIANT: 1,
+        RotationType.THIRD_VARIANT: 2,
+        RotationType.FOURTH_VARIANT: 3,
+    }
+
+        idx = mapping.get(rotation_type, 0)
+
+        self.message_index = min(idx, message_count - 1)
+        self.subject_index = min(idx, subject_count - 1)
 
     def rotate_sender(self):
         """Move to next sender in rotation"""
@@ -95,6 +108,7 @@ class EmailBatchProcessor:
         stats = {'successful': 0, 'failed': 0, 'errors': []}
 
         for count, email_data in enumerate(emails):
+            
             try:
                 # Get current configuration
                 sender = self.get_current_sender()
@@ -108,16 +122,14 @@ class EmailBatchProcessor:
                 to_email = email_data.get('Emails', email_data.get('email'))
                 result = email_client.send_html_email(from_=sender.email, to=to_email, subject=subject, html=body)
 
-                # Track results
                 if result.get('status') == 'success':
                     stats['successful'] += 1
                 else:
                     stats['failed'] += 1
                     stats['errors'].append({'email': email_data, 'error': result.get('message', 'Unknown error')})
-
+                
                 # Rotate sender for next email
                 self.rotate_sender()
-
                 # Check for content rotation
                 rotation_type = self.get_rotation_type(count)
                 if rotation_type:
@@ -129,7 +141,9 @@ class EmailBatchProcessor:
             except Exception as e:
                 stats['failed'] += 1
                 stats['errors'].append({'email': email_data, 'error': str(e)})
-                print(f"Error sending to {email_data}: {e}")
+            print(f"Error sending to {email_data}: {e}")
+        
+            
 
         return stats
 
@@ -140,7 +154,7 @@ def split_into_batches(items: List, batch_size: int) -> List[List]:
 
 
 @app.task(bind=True, name='tasks.send_bulk_emails')
-def send_bulk_emails(self, email_list: List[dict], messages: List[str], subjects: List[str]) -> Dict:
+def send_bulk_emails(self, email_list: List[dict], messages: List[str], subjects: List[str], email_senders:List[str]) -> Dict:
     """
     Send bulk emails with rotation of senders, messages, and subjects
 
@@ -162,7 +176,7 @@ def send_bulk_emails(self, email_list: List[dict], messages: List[str], subjects
     batches = split_into_batches(email_list, config.batch_size)
 
     # Initialize processor
-    processor = EmailBatchProcessor(EMAIL_SENDERS, config)
+    processor = EmailBatchProcessor([EmailConfig(email=email) for email in email_senders], config)
 
     # Track overall statistics
     total_stats = {'total_emails': len(email_list), 'batches_processed': 0, 'successful': 0, 'failed': 0, 'errors': []}

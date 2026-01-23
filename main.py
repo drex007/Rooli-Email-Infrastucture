@@ -1,6 +1,6 @@
 # main.py
 from math import ceil
-from celery_task import send_bulk_emails
+from celery_task import EMAIL_SENDERS, send_bulk_emails
 from config import MESSAGES, REDIS_EMAIL_KEY_PREFIX
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,6 +34,8 @@ app.add_middleware(
 
 
 redis_service = RedisService()
+
+
 
 
 @app.get("/")
@@ -131,7 +133,7 @@ def fetch_emails(page: int = 1, page_size: int = 70):
 def send_bulk_messages(payload: MailBodySerializer):
     try:
         extracted_data = redis_service.get_data(REDIS_EMAIL_KEY_PREFIX)  # This returns the list of emails
-        send_bulk_emails.delay(email_list=extracted_data, messages=payload.bodies, subjects=payload.subjects)
+        send_bulk_emails.delay(email_list=extracted_data, messages=payload.bodies, subjects=payload.subjects, email_senders = payload.senders)
         return BulkEmailResponse(message=f"Bulk email sending initiated to {len(extracted_data)} recipients.")
     except Exception as e:
         print("ERROR", str(e))
@@ -147,11 +149,22 @@ def send_selected_bulk_messages(payload: MailBodySerializer):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email list cannot be empty.")
 
         payload = payload.model_dump()
-        print(payload, "PAYLOAD")
+
         send_bulk_emails.delay(
-            email_list=payload["email_list"], messages=payload["bodies"], subjects=payload["subjects"]
+            email_list=payload["email_list"], messages=payload["bodies"], subjects=payload["subjects"], email_senders = payload['senders']
         )
         return BulkEmailResponse(message=f"Bulk email sending initiated to {len(payload['email_list'])} recipients.")
     except Exception as e:
         print(e, "ERROR")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Error!!Occurred try again")
+
+
+
+@app.get("/email-senders", response_model=dict)
+def get_email_senders():
+    try:
+        email_list = [item.email for item in EMAIL_SENDERS]
+        return {"senders": email_list}
+    except Exception as e:
+        print("ERROR", str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Error fetching email_senders")
