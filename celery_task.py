@@ -100,7 +100,7 @@ class EmailBatchProcessor:
                 sender = self.get_current_sender()
                 message = messages[self.message_index]
                 subject = subjects[self.subject_index]
-
+                message = message.replace("\n", "<br>")  # Added line breaks for emails
                 body = self._template_editor.edit_template_and_return_body(
                     "email_test.html", {"subject": subject, "message": f"{message}"}
                 )
