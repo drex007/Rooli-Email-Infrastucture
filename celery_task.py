@@ -7,6 +7,7 @@ from enum import Enum
 from config import BROKER_URL
 from email_providers.aws_ses_provider import EmailTemplateEditor
 from email_providers.email_client import email_client
+from email_providers.zepto_mail_client import ZeptoMailClient
 
 
 @dataclass
@@ -16,19 +17,29 @@ class EmailConfig:
     email: str
 
 
+class VariantValue (str, Enum):
+    first = 49
+    second = 99
+    third = 149
+    fourth = 199
+
+
+
 @dataclass
 class BatchConfig:
     """Configuration for batch processing"""
 
-    batch_size: int = 200
-    batch_delay_seconds: int = 3600
+    batch_size: int = 25 #200
+    batch_delay_seconds: int = 900 #15 minutes for the next batch
     email_delay_seconds: int = 60
     rotation_delay_seconds: int = 180
     rotation_intervals: List[int] = None
 
     def __post_init__(self):
         if self.rotation_intervals is None:
-            self.rotation_intervals = [49, 99, 149, 199]
+            self.rotation_intervals = [VariantValue.first, VariantValue.second, VariantValue.third, VariantValue.fourth]
+
+
 
 
 class RotationType(Enum):
@@ -44,9 +55,11 @@ app = Celery('tasks', broker=BROKER_URL, backend=BROKER_URL)
 
 # Configure email senders
 EMAIL_SENDERS = [
-    EmailConfig(email="marketing@deychop.xyz"),
-    EmailConfig(email="lucia@deychop.xyz"),
-    EmailConfig(email="support@deychop.xyz"),
+    EmailConfig(email="marketing@roolimarketing.xyz"),
+    EmailConfig(email="lucia@roolimarketing.xyz"),
+    EmailConfig(email="richard@roolimarketing.xyz"),
+    EmailConfig(email="mariam@roolimarketing.xyz"),
+      
 ]
 
 
@@ -62,6 +75,7 @@ class EmailBatchProcessor:
         senders: List[EmailConfig],
         config: BatchConfig,
         template_editor: EmailTemplateEditor = EmailTemplateEditor(),
+        zepto_mail_client: ZeptoMailClient = ZeptoMailClient()
     ):
         self.senders = senders
         self.config = config
@@ -69,18 +83,20 @@ class EmailBatchProcessor:
         self.message_index = 0
         self.subject_index = 0
         self._template_editor = template_editor
+        self._zepto_mail_client = zepto_mail_client
+
 
     def get_rotation_type(self, count: int) -> Optional[RotationType]:
         """Determine if rotation is needed and which type"""
         if count not in self.config.rotation_intervals:
             return None
 
-        if count < 49:
+        if count < VariantValue.first:
             return RotationType.FIRST_VARIANT
-        elif count > 49 and count < 99:
+        elif count > VariantValue.first and count < VariantValue.second:
             return RotationType.SECOND_VARIANT
 
-        elif count > 99 and count < 149:
+        elif count > VariantValue.third and count < VariantValue.fourth:
             return RotationType.THIRD_VARIANT
         else:
             return RotationType.FOURTH_VARIANT
@@ -123,7 +139,10 @@ class EmailBatchProcessor:
                 )
 
                 to_email = email_data.get('Emails', email_data.get('email'))
-                result = email_client.send_html_email(from_=sender.email, to=to_email, subject=subject, html=body)
+                # result = email_client.send_html_email(from_=sender.email, to=to_email, subject=subject, html=body)
+
+                #Moved from AWS client to zeptoMail
+                result = self._zepto_mail_client.send_email(from_address=sender.email, to_emails=[to_email], subject=subject, html_body=body)
 
                 if result.get('status') == 'success':
                     stats['successful'] += 1
@@ -144,7 +163,7 @@ class EmailBatchProcessor:
             except Exception as e:
                 stats['failed'] += 1
                 stats['errors'].append({'email': email_data, 'error': str(e)})
-            print(f"Error sending to {email_data}: {e}")
+                print(f"Error sending to {email_data}: {e}")
 
         return stats
 
