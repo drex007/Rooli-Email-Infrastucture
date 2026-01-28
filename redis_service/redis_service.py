@@ -4,7 +4,7 @@ import json
 
 class RedisService:
     pass
-    def __init__(self, redis_host='localhost', redis_port=6379, redis_db=0):
+    def __init__(self, redis_host='redis', redis_port=6379, redis_db=0):
         self.redis_host = redis_host
         self.redis_port = redis_port
         self.redis_db = redis_db
