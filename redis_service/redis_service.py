@@ -1,15 +1,18 @@
 import redis
 import json
 
+from config import REDIS_DB, REDIS_HOST, REDIS_PORT
+
 
 class RedisService:
     pass
-    def __init__(self, redis_host='redis', redis_port=6379, redis_db=0):
+
+    def __init__(self, redis_host=REDIS_HOST, redis_port=REDIS_PORT, redis_db=REDIS_DB):
         self.redis_host = redis_host
         self.redis_port = redis_port
         self.redis_db = redis_db
         self.r = redis.Redis(host=self.redis_host, port=self.redis_port, db=self.redis_db, decode_responses=True)
-     
+
     def get_data(self, key: str) -> list:
         """Get data from Redis and parse JSON string"""
         try:

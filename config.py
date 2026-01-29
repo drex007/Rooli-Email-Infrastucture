@@ -4,8 +4,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-BROKER_URL = "redis://redis:6379/0"
-REDIS_HOST = "redis"
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+BROKER_URL = f"redis://{REDIS_HOST}:6379/0"
 REDIS_PORT = 6379
 REDIS_DB = 0
 REDIS_EMAIL_KEY_PREFIX = "email"

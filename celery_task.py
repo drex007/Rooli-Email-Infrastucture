@@ -4,10 +4,11 @@ from celery import Celery
 import time
 from enum import Enum
 
-from config import BROKER_URL
+from config import BROKER_URL, REDIS_EMAIL_KEY_PREFIX
 from email_providers.aws_ses_provider import EmailTemplateEditor
 from email_providers.email_client import email_client
 from email_providers.zepto_mail_client import ZeptoMailClient
+from redis_service.redis_service import RedisService
 
 
 @dataclass
@@ -17,20 +18,19 @@ class EmailConfig:
     email: str
 
 
-class VariantValue (str, Enum):
+class VariantValue(str, Enum):
     first = 49
     second = 99
     third = 149
     fourth = 199
 
 
-
 @dataclass
 class BatchConfig:
     """Configuration for batch processing"""
 
-    batch_size: int = 25 #200
-    batch_delay_seconds: int = 900 #15 minutes for the next batch
+    batch_size: int = 25  # 200
+    batch_delay_seconds: int = 900  # 15 minutes for the next batch
     email_delay_seconds: int = 60
     rotation_delay_seconds: int = 180
     rotation_intervals: List[int] = None
@@ -38,8 +38,6 @@ class BatchConfig:
     def __post_init__(self):
         if self.rotation_intervals is None:
             self.rotation_intervals = [VariantValue.first, VariantValue.second, VariantValue.third, VariantValue.fourth]
-
-
 
 
 class RotationType(Enum):
@@ -59,7 +57,6 @@ EMAIL_SENDERS = [
     EmailConfig(email="lucia@roolimarketing.xyz"),
     EmailConfig(email="richard@roolimarketing.xyz"),
     EmailConfig(email="mariam@roolimarketing.xyz"),
-      
 ]
 
 
@@ -75,7 +72,8 @@ class EmailBatchProcessor:
         senders: List[EmailConfig],
         config: BatchConfig,
         template_editor: EmailTemplateEditor = EmailTemplateEditor(),
-        zepto_mail_client: ZeptoMailClient = ZeptoMailClient()
+        zepto_mail_client: ZeptoMailClient = ZeptoMailClient(),
+        redis_service: RedisService = RedisService(),
     ):
         self.senders = senders
         self.config = config
@@ -84,7 +82,7 @@ class EmailBatchProcessor:
         self.subject_index = 0
         self._template_editor = template_editor
         self._zepto_mail_client = zepto_mail_client
-
+        self._redis_service = redis_service
 
     def get_rotation_type(self, count: int) -> Optional[RotationType]:
         """Determine if rotation is needed and which type"""
@@ -134,15 +132,48 @@ class EmailBatchProcessor:
                 message = messages[self.message_index]
                 subject = subjects[self.subject_index]
                 message = message.replace("\n", "<br>")  # Added line breaks for emails
+                to_email = email_data.get('Emails', email_data.get('email'))
+                user_name = ""
+
+                # Extract first name and second name to send personalized emails
+                try:
+                    extracted_data = self._redis_service.get_data(
+                        REDIS_EMAIL_KEY_PREFIX
+                    )  # This returns the list of emails
+                    for email_instance in extracted_data:
+                        if email_instance.get('Emails', '').strip() == to_email:
+                            name_parts = email_instance.get('Name', '').split()
+                            first_name = name_parts[0] if len(name_parts) > 0 else ''
+                            last_name = name_parts[1] if len(name_parts) > 1 else ''
+
+                            message = message.replace("{{first_name}}", first_name)
+                            message = message.replace("{{last_name}}", last_name)
+
+                            user_name = f"{first_name} {last_name}"
+
+                        if email_instance.get('Emails', '').strip() == to_email:
+                            name_parts = email_instance.get('Name', '').split()
+                            first_name = name_parts[0] if len(name_parts) > 0 else ''
+                            last_name = name_parts[1] if len(name_parts) > 1 else ''
+
+                            subject = subject.replace("{{first_name}}", first_name)
+                            subject = subject.replace("{{last_name}}", last_name)
+                            break  # Exit loop once match is found
+
+                except Exception as e:
+                    print(e, "LOOP ERROR")
+                    continue
+
                 body = self._template_editor.edit_template_and_return_body(
                     "email_test.html", {"subject": subject, "message": f"{message}"}
                 )
 
-                to_email = email_data.get('Emails', email_data.get('email'))
                 # result = email_client.send_html_email(from_=sender.email, to=to_email, subject=subject, html=body)
 
-                #Moved from AWS client to zeptoMail
-                result = self._zepto_mail_client.send_email(from_address=sender.email, to_emails=[to_email], subject=subject, html_body=body)
+                # Moved from AWS client to zeptoMail
+                result = self._zepto_mail_client.send_email(
+                    from_address=sender.email, to_emails=[to_email], subject=subject, html_body=body, name=user_name
+                )
 
                 if result.get('status') == 'success':
                     stats['successful'] += 1
