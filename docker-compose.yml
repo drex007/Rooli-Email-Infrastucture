@@ -4,7 +4,6 @@ services:
   api:
     container_name: fastapi_api
     build: .
-    # Gunicorn + Uvicorn workers (production-grade)
     command: >
       gunicorn main:app
       -k uvicorn.workers.UvicornWorker
@@ -49,4 +48,10 @@ services:
     container_name: redis
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data  # ✅ ADD THIS - persists data
+    command: redis-server --appendonly yes  # ✅ ADD THIS - enables AOF persistence
     restart: unless-stopped
+
+volumes:  # ✅ ADD THIS SECTION
+  redis_data:
