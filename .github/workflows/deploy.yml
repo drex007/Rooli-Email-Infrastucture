@@ -19,16 +19,23 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Copy project files to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: ${{ secrets.DEPLOY_PORT }}
-          source: "."
-          target: "~"
-          # Don't delete existing files (keeps the server's .env in place)
-          rm: false
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+          SSH="ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_PORT }} -o StrictHostKeyChecking=accept-new"
+          HOST="${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}"
+
+          # Ship code to the server's home dir (tar over ssh = only needs tar + ssh).
+          # .env is excluded so the server's secrets are never overwritten.
+          tar czf - \
+            --exclude='.git' \
+            --exclude='.env' \
+            --exclude='env' \
+            --exclude='__pycache__' \
+            . | $SSH "$HOST" 'tar xzf - -C "$HOME"'
 
       - name: Build and restart on server
         uses: appleboy/ssh-action@v1.0.3
