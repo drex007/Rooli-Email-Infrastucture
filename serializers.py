@@ -43,3 +43,11 @@ class EmailMessageListPayload(BaseModel):
 
 class EmailMessageListSerializer(BaseModel):
     messages: Optional[List[EmailMessageSample]] = []
+
+
+class SendersPayload(BaseModel):
+    senders: List[str]
+
+
+class SendersSerializer(BaseModel):
+    senders: List[str] = []

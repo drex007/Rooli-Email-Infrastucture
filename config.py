@@ -16,6 +16,8 @@ REDIS_EMAIL_KEY_PREFIX = "email"
 
 MESSAGES = "message"
 
+SENDERS = "senders"
+
 AWS_REGION_NAME = os.getenv("AWS_REGION_NAME")
 
 AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")

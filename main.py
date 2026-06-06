@@ -1,7 +1,7 @@
 # main.py
 from math import ceil
 from celery_task import EMAIL_SENDERS, send_bulk_emails
-from config import MESSAGES, REDIS_EMAIL_KEY_PREFIX
+from config import MESSAGES, REDIS_EMAIL_KEY_PREFIX, SENDERS
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, UploadFile, File
@@ -14,6 +14,8 @@ from serializers import (
     EmailMessagePayload,
     ExtractedFileSerializer,
     MailBodySerializer,
+    SendersPayload,
+    SendersSerializer,
 )
 import uuid
 
@@ -162,11 +164,41 @@ def send_selected_bulk_messages(payload: MailBodySerializer):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Error!!Occurred try again")
 
 
-@app.get("/email-senders", response_model=dict)
+@app.get("/email-senders", response_model=SendersSerializer)
 def get_email_senders():
     try:
-        email_list = [item.email for item in EMAIL_SENDERS]
-        return {"senders": email_list}
+        senders = redis_service.get_data(SENDERS)
+        # Seed Redis with the default senders on first read
+        if not senders:
+            senders = [item.email for item in EMAIL_SENDERS]
+            redis_service.set_data(SENDERS, senders)
+        return SendersSerializer(senders=senders)
     except Exception as e:
         print("ERROR", str(e))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Error fetching email_senders")
+
+
+@app.post("/email-senders", response_model=SendersSerializer)
+def set_email_senders(payload: SendersPayload):
+    """Replace the list of sender addresses. Persisted in Redis, so changing
+    senders no longer requires a code change or redeploy."""
+    try:
+        # De-duplicate while preserving order and dropping blanks
+        senders = list(dict.fromkeys(s.strip() for s in payload.senders if s and s.strip()))
+        redis_service.set_data(SENDERS, senders)
+        return SendersSerializer(senders=senders)
+    except Exception as e:
+        print("ERROR", str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Error saving email_senders")
+
+
+@app.delete("/email-senders/{sender}", response_model=SendersSerializer)
+def remove_email_sender(sender: str):
+    try:
+        senders = redis_service.get_data(SENDERS) or [item.email for item in EMAIL_SENDERS]
+        senders = [s for s in senders if s != sender]
+        redis_service.set_data(SENDERS, senders)
+        return SendersSerializer(senders=senders)
+    except Exception as e:
+        print("ERROR", str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Error deleting email_sender")

@@ -1,4 +1,4 @@
-FROM python:3.10-alpine
+FROM python:3.10-slim
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -7,14 +7,7 @@ ENV PYTHONUNBUFFERED=1
 # Set work directory
 WORKDIR /app
 
-# Install system dependencies (needed for some Python packages)
-# RUN apk add --no-cache \
-#     gcc \
-#     musl-dev \
-#     libffi-dev \
-
-
-# Copy requirements first (for better caching)
+# Copy requirements first (for better layer caching)
 COPY requirements.txt .
 
 # Install Python dependencies
@@ -23,6 +16,10 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # Copy project files
 COPY . .
+
+# Run as a non-root user
+RUN useradd --create-home --uid 1000 appuser && chown -R appuser:appuser /app
+USER appuser
 
 # Expose FastAPI port
 EXPOSE 8000
