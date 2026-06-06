@@ -26,16 +26,14 @@ jobs:
           script: |
             set -euo pipefail
 
-            # Project lives in the login user's home directory
-            APP_DIR="$HOME/emailing-infrastructure"
+            # Project lives directly in the login user's home directory
+            cd "$HOME"
 
-            # The repo must already be cloned on the server (one-time manual setup)
-            if [ ! -d "$APP_DIR/.git" ]; then
-              echo "ERROR: $APP_DIR is not a git repo. Clone it and add .env first." >&2
+            # The repo must already be cloned here (one-time manual setup)
+            if [ ! -d ".git" ]; then
+              echo "ERROR: $HOME is not a git repo. Clone the project here and add .env first." >&2
               exit 1
             fi
-
-            cd "$APP_DIR"
             git fetch --all --prune
             git reset --hard origin/main
 
