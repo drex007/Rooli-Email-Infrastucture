@@ -28,14 +28,16 @@ jobs:
           SSH="ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_PORT }} -o StrictHostKeyChecking=accept-new"
           HOST="${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}"
 
-          # Ship code to the server's home dir (tar over ssh = only needs tar + ssh).
-          # .env is excluded so the server's secrets are never overwritten.
+          # Ensure target dir exists on the server
+          $SSH "$HOST" 'mkdir -p /opt/rooli-marketing'
+
+          # Ship code; --no-same-owner stops tar from stamping runner UID (1001) onto files/dirs
           tar czf - \
             --exclude='.git' \
             --exclude='.env' \
             --exclude='env' \
             --exclude='__pycache__' \
-            . | $SSH "$HOST" 'tar xzf - -C "$HOME"'
+            . | $SSH "$HOST" 'tar xzf - --no-same-owner --no-overwrite-dir -C /opt/rooli-marketing'
 
       - name: Build and restart on server
         uses: appleboy/ssh-action@v1.0.3
@@ -48,23 +50,19 @@ jobs:
           script: |
             set -euo pipefail
 
-            # Build in the login user's home directory
-            cd "$HOME"
+            cd /opt/rooli-marketing
 
-            # .env holds secrets and is NOT shipped from the repo — create it once on the server
             if [ ! -f .env ]; then
-              echo "ERROR: .env missing in $HOME. Create it once with your secrets, then re-run." >&2
+              echo "ERROR: .env missing in /opt/rooli-marketing. Create it once with your secrets, then re-run." >&2
               exit 1
             fi
 
-            # Pick the compose command available on the host
             if docker compose version >/dev/null 2>&1; then
               COMPOSE="docker compose"
             else
               COMPOSE="docker-compose"
             fi
 
-            # Rebuild and restart, then prune dangling images
             $COMPOSE pull redis || true
             $COMPOSE up -d --build
             docker image prune -f
