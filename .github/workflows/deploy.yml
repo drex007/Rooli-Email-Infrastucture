@@ -15,7 +15,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy over SSH
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Copy project files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          source: "."
+          target: "~"
+          # Don't delete existing files (keeps the server's .env in place)
+          rm: false
+
+      - name: Build and restart on server
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DEPLOY_HOST }}
@@ -26,16 +41,14 @@ jobs:
           script: |
             set -euo pipefail
 
-            # Project lives directly in the login user's home directory
+            # Build in the login user's home directory
             cd "$HOME"
 
-            # The repo must already be cloned here (one-time manual setup)
-            if [ ! -d ".git" ]; then
-              echo "ERROR: $HOME is not a git repo. Clone the project here and add .env first." >&2
+            # .env holds secrets and is NOT shipped from the repo — create it once on the server
+            if [ ! -f .env ]; then
+              echo "ERROR: .env missing in $HOME. Create it once with your secrets, then re-run." >&2
               exit 1
             fi
-            git fetch --all --prune
-            git reset --hard origin/main
 
             # Pick the compose command available on the host
             if docker compose version >/dev/null 2>&1; then
