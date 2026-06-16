@@ -18,6 +18,22 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Debug environment
+        run: |
+          echo "===== WHO AM I ====="
+          whoami
+          id
+          echo "===== PATHS ====="
+          echo "HOME=$HOME"
+          echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
+          echo "PWD=$(pwd)"
+          echo "===== OWNERSHIP ====="
+          ls -ld "$GITHUB_WORKSPACE" || echo "cannot stat GITHUB_WORKSPACE"
+          ls -ld "$HOME" || echo "cannot stat HOME"
+          echo "===== WRITE TEST ====="
+          mkdir -p "$GITHUB_WORKSPACE/.writetest" && echo "workspace writable" || echo "workspace NOT writable"
+          mkdir -p "$HOME/.writetest" && echo "home writable" || echo "home NOT writable"
+
       - name: Copy project files to server
         run: |
           # Use the workspace dir instead of ~/.ssh to avoid HOME/permission issues
