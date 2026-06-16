@@ -20,12 +20,15 @@ jobs:
 
       - name: Copy project files to server
         run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+          # Use the workspace dir instead of ~/.ssh to avoid HOME/permission issues
+          KEYDIR="$GITHUB_WORKSPACE/.deploy-ssh"
+          mkdir -p "$KEYDIR"
+          chmod 700 "$KEYDIR"
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > "$KEYDIR/deploy_key"
+          chmod 600 "$KEYDIR/deploy_key"
+          ssh-keyscan -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_HOST }}" > "$KEYDIR/known_hosts" 2>/dev/null || true
 
-          SSH="ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_PORT }} -o StrictHostKeyChecking=accept-new"
+          SSH="ssh -i $KEYDIR/deploy_key -p ${{ secrets.DEPLOY_PORT }} -o UserKnownHostsFile=$KEYDIR/known_hosts -o StrictHostKeyChecking=accept-new"
           HOST="${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}"
 
           # Ensure target dir exists on the server
