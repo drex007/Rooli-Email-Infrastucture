@@ -8,7 +8,12 @@ from config import BROKER_URL, REDIS_EMAIL_KEY_PREFIX
 from email_providers.aws_ses_provider import EmailTemplateEditor
 from email_providers.email_client import email_client
 from email_providers.zepto_mail_client import ZeptoMailClient
+from email_threading import build_thread_headers
+from email_identity import get_business_identity
 from redis_service.redis_service import RedisService
+from sequence_store import SequenceStore
+from suppression_store import SuppressionStore, build_unsubscribe_headers
+from template_renderer import build_recipient_context, render_message_html, render_template_text
 
 
 @dataclass
@@ -50,6 +55,13 @@ class RotationType(Enum):
 
 
 app = Celery('tasks', broker=BROKER_URL, backend=BROKER_URL)
+app.conf.beat_schedule = {
+    'dispatch-due-sequence-emails': {
+        'task': 'tasks.dispatch_due_sequence_emails',
+        'schedule': 30.0,
+    },
+}
+app.conf.timezone = 'UTC'
 
 # Configure email senders
 EMAIL_SENDERS = [
@@ -83,6 +95,7 @@ class EmailBatchProcessor:
         self._template_editor = template_editor
         self._zepto_mail_client = zepto_mail_client
         self._redis_service = redis_service
+        self._suppression_store = SuppressionStore(redis_service)
 
     def get_rotation_type(self, count: int) -> Optional[RotationType]:
         """Determine if rotation is needed and which type"""
@@ -121,9 +134,15 @@ class EmailBatchProcessor:
         """Get current sender configuration"""
         return self.senders[self.sender_index]
 
-    def process_batch(self, emails: List[dict], messages: List[str], subjects: List[str]) -> Dict:
+    def process_batch(
+        self,
+        emails: List[dict],
+        messages: List[str],
+        subjects: List[str],
+        campaign_id: str = "default",
+    ) -> Dict:
         """Process a batch of emails with rotation"""
-        stats = {'successful': 0, 'failed': 0, 'errors': []}
+        stats = {'successful': 0, 'failed': 0, 'suppressed': 0, 'errors': []}
 
         for count, email_data in enumerate(emails):
             try:
@@ -131,48 +150,48 @@ class EmailBatchProcessor:
                 sender = self.get_current_sender()
                 message = messages[self.message_index]
                 subject = subjects[self.subject_index]
-                message = message.replace("\n", "<br>")  # Added line breaks for emails
                 to_email = email_data.get('Emails', email_data.get('email'))
+                if self._suppression_store.is_suppressed(to_email):
+                    stats['suppressed'] += 1
+                    continue
                 user_name = ""
 
-                # Extract first name and second name to send personalized emails
+                recipient = email_data
                 try:
-                    extracted_data = self._redis_service.get_data(
-                        REDIS_EMAIL_KEY_PREFIX
-                    )  # This returns the list of emails
+                    extracted_data = self._redis_service.get_data(REDIS_EMAIL_KEY_PREFIX)
                     for email_instance in extracted_data:
                         if email_instance.get('Emails', '').strip() == to_email:
-                            name_parts = email_instance.get('Name', '').split()
-                            first_name = name_parts[0] if len(name_parts) > 0 else ''
-                            last_name = name_parts[1] if len(name_parts) > 1 else ''
-
-                            message = message.replace("{{first_name}}", first_name)
-                            message = message.replace("{{last_name}}", last_name)
-
-                            user_name = f"{first_name} {last_name}"
-
-                        if email_instance.get('Emails', '').strip() == to_email:
-                            name_parts = email_instance.get('Name', '').split()
-                            first_name = name_parts[0] if len(name_parts) > 0 else ''
-                            last_name = name_parts[1] if len(name_parts) > 1 else ''
-
-                            subject = subject.replace("{{first_name}}", first_name)
-                            subject = subject.replace("{{last_name}}", last_name)
-                            break  # Exit loop once match is found
+                            recipient = email_instance
+                            break
 
                 except Exception as e:
                     print(e, "LOOP ERROR")
                     continue
 
-                body = self._template_editor.edit_template_and_return_body(
-                    "email_test.html", {"subject": subject, "message": f"{message}"}
-                )
+                context = build_recipient_context(recipient)
+                user_name = context.get('full_name', '')
+                subject = render_template_text(subject, context)
+                message = render_message_html(message, context)
+
+                unsubscribe_url = self._suppression_store.unsubscribe_url(to_email, campaign_id)
+                template_context = {
+                    "subject": subject,
+                    "message": f"{message}",
+                    "unsubscribe_url": unsubscribe_url,
+                    **get_business_identity(sender.email),
+                }
+                body = self._template_editor.edit_template_and_return_body("email_test.html", template_context)
 
                 # result = email_client.send_html_email(from_=sender.email, to=to_email, subject=subject, html=body)
 
                 # Moved from AWS client to zeptoMail
                 result = self._zepto_mail_client.send_email(
-                    from_address=sender.email, to_emails=[to_email], subject=subject, html_body=body, name=user_name
+                    from_address=sender.email,
+                    to_emails=[to_email],
+                    subject=subject,
+                    html_body=body,
+                    name=user_name,
+                    mime_headers=build_unsubscribe_headers(unsubscribe_url),
                 )
 
                 if result.get('status') == 'success':
@@ -206,7 +225,12 @@ def split_into_batches(items: List, batch_size: int) -> List[List]:
 
 @app.task(bind=True, name='tasks.send_bulk_emails')
 def send_bulk_emails(
-    self, email_list: List[dict], messages: List[str], subjects: List[str], email_senders: List[str]
+    self,
+    email_list: List[dict],
+    messages: List[str],
+    subjects: List[str],
+    email_senders: List[str],
+    campaign_id: str = "default",
 ) -> Dict:
     """
     Send bulk emails with rotation of senders, messages, and subjects
@@ -232,18 +256,26 @@ def send_bulk_emails(
     processor = EmailBatchProcessor([EmailConfig(email=email) for email in email_senders], config)
 
     # Track overall statistics
-    total_stats = {'total_emails': len(email_list), 'batches_processed': 0, 'successful': 0, 'failed': 0, 'errors': []}
+    total_stats = {
+        'total_emails': len(email_list),
+        'batches_processed': 0,
+        'successful': 0,
+        'failed': 0,
+        'suppressed': 0,
+        'errors': [],
+    }
 
     # Process each batch
     for batch_num, batch in enumerate(batches):
         print(f"Processing batch {batch_num + 1}/{len(batches)} " f"({len(batch)} emails)")
 
-        batch_stats = processor.process_batch(batch, messages, subjects)
+        batch_stats = processor.process_batch(batch, messages, subjects, campaign_id)
 
         # Update total statistics
         total_stats['batches_processed'] += 1
         total_stats['successful'] += batch_stats['successful']
         total_stats['failed'] += batch_stats['failed']
+        total_stats['suppressed'] += batch_stats['suppressed']
         total_stats['errors'].extend(batch_stats['errors'])
 
         # Wait between batches (except after last batch)
@@ -254,6 +286,173 @@ def send_bulk_emails(
     print(f"Completed: {total_stats['successful']} successful, " f"{total_stats['failed']} failed")
 
     return total_stats
+
+
+def _complete_sequence_if_finished(store: SequenceStore, sequence: Dict) -> None:
+    terminal_statuses = {'completed', 'failed', 'cancelled', 'suppressed'}
+    for enrollment_id in sequence.get('enrollment_ids', []):
+        enrollment = store.get_enrollment(enrollment_id)
+        if enrollment and enrollment.get('status') not in terminal_statuses:
+            return
+    if sequence.get('status') != 'cancelled':
+        sequence['status'] = 'completed'
+        sequence['completed_at'] = time.time()
+        store.save_sequence(sequence)
+
+
+@app.task(name='tasks.dispatch_due_sequence_emails')
+def dispatch_due_sequence_emails() -> Dict:
+    """Move due Redis schedule entries onto the Celery work queue."""
+    store = SequenceStore()
+    enrollment_ids = store.claim_due_enrollments()
+    for enrollment_id in enrollment_ids:
+        enrollment = store.get_enrollment(enrollment_id)
+        if enrollment:
+            send_sequence_step.delay(enrollment_id, enrollment.get('next_step_index', 0))
+        else:
+            store.acknowledge_enrollment(enrollment_id)
+    return {'dispatched': len(enrollment_ids)}
+
+
+@app.task(name='tasks.send_sequence_step', rate_limit='1/m')
+def send_sequence_step(enrollment_id: str, expected_step_index: Optional[int] = None) -> Dict:
+    """Send one sequence step and schedule the recipient's next step."""
+    store = SequenceStore()
+    suppression_store = SuppressionStore()
+    with store.lock_enrollment(enrollment_id):
+        enrollment = store.get_enrollment(enrollment_id)
+        if not enrollment:
+            store.acknowledge_enrollment(enrollment_id)
+            return {'status': 'missing'}
+
+        if expected_step_index is not None and enrollment.get('next_step_index', 0) != expected_step_index:
+            store.acknowledge_enrollment(enrollment_id)
+            return {'status': 'duplicate_skipped'}
+
+        sequence = store.get_sequence(enrollment['sequence_id'])
+        if not sequence or sequence.get('status') == 'cancelled':
+            enrollment['status'] = 'cancelled'
+            store.save_enrollment(enrollment)
+            store.acknowledge_enrollment(enrollment_id)
+            return {'status': 'cancelled'}
+
+        if sequence.get('status') == 'preparing':
+            store.schedule_enrollment(enrollment, time.time() + 5)
+            return {'status': 'preparing'}
+
+        if sequence.get('status') == 'completed':
+            store.acknowledge_enrollment(enrollment_id)
+            return {'status': 'completed'}
+
+        if sequence.get('status') == 'paused':
+            store.schedule_enrollment(enrollment, time.time() + 60)
+            return {'status': 'paused'}
+
+        step_index = enrollment.get('next_step_index', 0)
+        steps = sequence.get('steps', [])
+        if step_index >= len(steps):
+            enrollment['status'] = 'completed'
+            store.save_enrollment(enrollment)
+            store.acknowledge_enrollment(enrollment_id)
+            _complete_sequence_if_finished(store, sequence)
+            return {'status': 'completed'}
+
+        step = steps[step_index]
+        recipient = enrollment['recipient']
+        context = build_recipient_context(recipient)
+        to_email = context.get('email')
+        if not to_email:
+            enrollment['status'] = 'failed'
+            enrollment['last_error'] = 'Recipient has no email address'
+            store.save_enrollment(enrollment)
+            store.acknowledge_enrollment(enrollment_id)
+            _complete_sequence_if_finished(store, sequence)
+            return {'status': 'failed', 'error': enrollment['last_error']}
+
+        if suppression_store.is_suppressed(to_email):
+            enrollment['status'] = 'suppressed'
+            enrollment['next_run_at'] = None
+            enrollment['last_error'] = 'Recipient unsubscribed or is suppressed'
+            store.save_enrollment(enrollment)
+            store.acknowledge_enrollment(enrollment_id)
+            _complete_sequence_if_finished(store, sequence)
+            return {'status': 'suppressed'}
+
+        sender = enrollment['sender']
+        rendered_step_subject = render_template_text(step['subject'], context)
+        rendered_step_subject = rendered_step_subject.replace('\r', ' ').replace('\n', ' ')
+        if step_index == 0:
+            subject = rendered_step_subject
+            enrollment['thread_subject'] = subject
+        else:
+            root_subject = enrollment.get('thread_subject') or rendered_step_subject
+            subject = root_subject if root_subject.lower().startswith('re:') else f"Re: {root_subject}"
+
+        sent_message_ids = enrollment.get('sent_message_ids', [])
+        message_id, mime_headers = build_thread_headers(sender, sent_message_ids)
+        unsubscribe_url = suppression_store.unsubscribe_url(
+            to_email,
+            sequence.get('campaign_id', 'default'),
+        )
+        mime_headers.update(build_unsubscribe_headers(unsubscribe_url))
+
+        message = render_message_html(step['body'], context)
+        template_context = {
+            'subject': subject,
+            'message': message,
+            'unsubscribe_url': unsubscribe_url,
+            **get_business_identity(sender),
+        }
+        body = EmailTemplateEditor().edit_template_and_return_body('email_test.html', template_context)
+        enrollment['status'] = 'sending'
+        store.save_enrollment(enrollment)
+
+        result = ZeptoMailClient().send_email(
+            from_address=sender,
+            to_emails=[to_email],
+            subject=subject,
+            html_body=body,
+            name=context.get('full_name', ''),
+            mime_headers=mime_headers,
+            client_reference=f"{enrollment['sequence_id']}:{enrollment_id}:{step_index}",
+        )
+
+        if result.get('status') != 'success':
+            attempts = enrollment.get('attempts', 0) + 1
+            enrollment['attempts'] = attempts
+            enrollment['last_error'] = result.get('message', 'Unknown provider error')
+            if attempts < 3:
+                store.schedule_enrollment(enrollment, time.time() + 300)
+                return {'status': 'retry_scheduled', 'attempts': attempts}
+            enrollment['status'] = 'failed'
+            store.save_enrollment(enrollment)
+            store.acknowledge_enrollment(enrollment_id)
+            _complete_sequence_if_finished(store, sequence)
+            return {'status': 'failed', 'error': enrollment['last_error']}
+
+        enrollment.setdefault('history', []).append({
+            'step_index': step_index,
+            'sent_at': time.time(),
+            'message_id': message_id,
+            'provider_request_id': result.get('request_id'),
+        })
+        enrollment.setdefault('sent_message_ids', []).append(message_id)
+        enrollment['attempts'] = 0
+        enrollment['last_error'] = None
+        enrollment['next_step_index'] = step_index + 1
+
+        if enrollment['next_step_index'] >= len(steps):
+            enrollment['status'] = 'completed'
+            enrollment['next_run_at'] = None
+            store.save_enrollment(enrollment)
+            store.acknowledge_enrollment(enrollment_id)
+            _complete_sequence_if_finished(store, sequence)
+        else:
+            next_step = steps[enrollment['next_step_index']]
+            due_at = time.time() + next_step.get('delay_seconds', 0)
+            store.schedule_enrollment(enrollment, due_at)
+
+        return {'status': enrollment['status'], 'step_index': step_index}
 
 
 # Optional: Add a task to get sending statistics

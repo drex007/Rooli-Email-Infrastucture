@@ -35,6 +35,8 @@ class ZeptoMailClient:
         cc: Optional[List[Dict[str, str]]] = None,
         bcc: Optional[List[Dict[str, str]]] = None,
         reply_to: Optional[str] = None,
+        mime_headers: Optional[Dict[str, str]] = None,
+        client_reference: Optional[str] = None,
     ) -> Dict:
         """
         Send transactional email via ZeptoMail
@@ -61,15 +63,31 @@ class ZeptoMailClient:
             payload["bcc"] = [{"email_address": email} for email in bcc]
 
         if reply_to:
-            payload["reply_to"] = {"address": reply_to}
+            payload["reply_to"] = [{"address": reply_to}]
 
-        response = requests.post(self.BASE_URL, headers=self.headers, json=payload, timeout=15)
+        if mime_headers:
+            payload["mime_headers"] = mime_headers
+
+        if client_reference:
+            payload["client_reference"] = client_reference
 
         try:
+            response = requests.post(self.BASE_URL, headers=self.headers, json=payload, timeout=15)
             res = response.json()
-            print(res, "ZEPTO MAIL RESPONSE")
-            return {"status": "success"}
+            if not response.ok:
+                print(res, "ZEPTO MAIL ERROR")
+                return {
+                    "status": "failure",
+                    "message": res.get("error", {}).get("message", response.reason),
+                    "provider_response": res,
+                }
 
+            print(res, "ZEPTO MAIL RESPONSE")
+            return {
+                "status": "success",
+                "request_id": res.get("request_id"),
+                "provider_response": res,
+            }
         except Exception as e:
             print(e, "ZEPTO MAIL ERROR")
-            return {"status": "failure"}
+            return {"status": "failure", "message": str(e)}

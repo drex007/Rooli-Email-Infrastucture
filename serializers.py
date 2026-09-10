@@ -1,5 +1,5 @@
-from typing import Any, List, Optional
-from pydantic import BaseModel
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field, field_validator
 
 
 class ExtractedFileSerializer(BaseModel):
@@ -24,11 +24,17 @@ class MailBodySerializer(BaseModel):
     bodies: List[str]
     email_list: Optional[List[EmailAddress]] = None
     senders: Optional[List[str]] = None  # List of emails to used to send
+    campaign_id: str = "default"
 
 
 class EmailMessagePayload(BaseModel):
     subject: str
     body: str
+
+
+class CampaignPayload(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=500)
 
 
 class EmailMessageSample(BaseModel):
@@ -51,3 +57,42 @@ class SendersPayload(BaseModel):
 
 class SendersSerializer(BaseModel):
     senders: List[str] = []
+
+
+class SequenceStepPayload(BaseModel):
+    subject: str
+    body: str
+    delay_seconds: int = Field(default=0, ge=0)
+
+
+class StartSequencePayload(BaseModel):
+    name: Optional[str] = None
+    campaign_id: str = "default"
+    steps: List[SequenceStepPayload] = Field(min_length=1)
+    email_list: Optional[List[Dict[str, Any]]] = None
+    senders: List[str] = Field(min_length=1)
+
+    @field_validator("steps")
+    @classmethod
+    def validate_steps(cls, steps: List[SequenceStepPayload]):
+        for step in steps:
+            if not step.subject.strip() or not step.body.strip():
+                raise ValueError("Every sequence step needs a subject and body")
+        steps[0].delay_seconds = 0
+        return steps
+
+
+class StartSequenceResponse(BaseModel):
+    sequence_id: str
+    message: str
+    enrolled: int
+
+
+class TemplateVariable(BaseModel):
+    key: str
+    label: str
+    token: str
+
+
+class TemplateVariablesResponse(BaseModel):
+    variables: List[TemplateVariable]

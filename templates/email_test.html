@@ -3,7 +3,7 @@
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>Reset Password</title>
+		<title>{{subject}}</title>
 		<link rel="preconnect" href="https://fonts.googleapis.com" />
 		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 		<link
@@ -272,7 +272,12 @@
 										text-align: center;
 									"
 								>
-								© Rooli.co Team
+									<strong style="color: #3f3f46">{{business_copyright}}</strong><br />
+									{% if business_address %}{{business_address}}<br />{% endif %}
+									<a href="mailto:{{business_contact_email}}" style="color: #5f55d6">{{business_contact_email}}</a><br />
+								<a href="{{business_website_url}}" style="color: #5f55d6">Visit our website</a>
+								<span style="padding: 0 5px; color: #b4b4bc">·</span>
+								<a href="{{unsubscribe_url}}" style="color: #5f55d6">Unsubscribe</a>
 								</p>
 							</td>
 						</tr>
